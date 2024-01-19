@@ -1,14 +1,16 @@
-class TokensError(Exception):
-    """No environment variables."""
+class NoTokensError(Exception):
+    """Raises when we do not have token(s)."""
+
+    pass
 
 
 class RequestError(Exception):
-    """Request doesn't work."""
+    """Something worng with request."""
+
+    pass
 
 
-class MessageError(Exception):
-    """Message did not send."""
+class AnswerNot200(Exception):
+    """Raises only when answer not 200."""
 
-
-class ResponseKeysError(Exception):
-    """Incorrect key(s) in response."""
+    pass
