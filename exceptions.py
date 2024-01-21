@@ -10,7 +10,7 @@ class RequestError(Exception):
     pass
 
 
-class AnswerNot200(Exception):
+class AnswerNot200Error(Exception):
     """Raises only when answer not 200."""
 
     pass

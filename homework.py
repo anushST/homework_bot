@@ -7,7 +7,7 @@ import requests
 from dotenv import load_dotenv
 from telegram import Bot
 
-from exceptions import AnswerNot200, NoTokensError, RequestError
+from exceptions import AnswerNot200Error, NoTokensError, RequestError
 
 load_dotenv()
 
@@ -37,19 +37,28 @@ logger.addHandler(handler)
 
 def check_tokens():
     """Checks if the tokens are None."""
-    missing_tokens = list(token for token in [
-        PRACTICUM_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN
-    ] if token is None)
+    tokens = {
+        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
+        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
+        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
+    }
+    missing_tokens = {}
+    for key, value in tokens.items():
+        if value is None:
+            missing_tokens[key] = value
     if missing_tokens:
-        logger.critical(f'Missing required environment '
-                        f'variables: {missing_tokens}')
-        raise NoTokensError(f'No Token(s): {missing_tokens}')
+        logger.critical('Missing required environment '
+                        f'variables: {list(missing_tokens.keys())}')
+        raise NoTokensError(f'No Token(s): {list(missing_tokens.keys())}')
 
 
 def send_message(bot, message):
     """Sends message to bot."""
-    bot.send_message(TELEGRAM_CHAT_ID, message)
-    logger.debug('Message sent succesfully')
+    try:
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+        logger.debug('Message sent succesfully')
+    except Exception:
+        logger.exception("Error while sending message to bot")
 
 
 def get_api_answer(timestamp):
@@ -58,20 +67,26 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(ENDPOINT, params=params, headers=HEADERS)
     except requests.RequestException:
-        raise RequestError('Server error')
+        # А почему просто не оставить чтоб исключение RequestException
+        # словилось в main
+        raise RequestError('Something went wrong while getting data '
+                           'from endpoint')
 
     if response.status_code != HTTPStatus.OK:
-        raise AnswerNot200('Incorrect status code')
+        raise AnswerNot200Error('Incorrect status code')
     return response.json()  # Обрабатывается в main()
 
 
 def check_response(response):
     """Checks response data according documentation."""
-    if 'homeworks' not in response or 'current_date' not in response:
-        # Если написать KeyError то тесты будут жаловаться test_bot.py:453
-        raise TypeError('Keys not in response')
+    if not isinstance(response, dict):
+        raise TypeError('Data is not dict')
+    if 'homeworks' not in response:
+        raise KeyError('Key "homeworks" is not in response')
+    if 'current_date' not in response:
+        logger.error('Key "current_date" is not in response')
     if not isinstance(response['current_date'], int):
-        raise TypeError('Response is not int')
+        logger.error('"current_date" is not <int>')
     if not isinstance(response['homeworks'], list):
         raise TypeError('Response is not dict')
     return response
@@ -80,10 +95,13 @@ def check_response(response):
 def parse_status(homework):
     """Returns status info."""
     if 'homework_name' not in homework:
-        raise KeyError('Unknow homework_name')
+        raise ValueError('Dict "homework_name" is not in '
+                         'response["homework"][0]')
+    if 'status' not in homework:
+        raise ValueError('Str "status" is not in response["homework"][0]')
     homework_name = homework['homework_name']
     if homework['status'] not in HOMEWORK_VERDICTS:
-        raise KeyError('Unknow status')
+        raise ValueError('Unknow status')
     verdict = HOMEWORK_VERDICTS[homework['status']]
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
