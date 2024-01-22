@@ -5,9 +5,10 @@ from http import HTTPStatus
 
 import requests
 from dotenv import load_dotenv
-from telegram import Bot
+from telegram import Bot, TelegramError
 
-from exceptions import AnswerNot200Error, NoTokensError, RequestError
+from exceptions import (AnswerNot200Error, JsonError, NoTokensError,
+                        RequestError)
 
 load_dotenv()
 
@@ -37,28 +38,25 @@ logger.addHandler(handler)
 
 def check_tokens():
     """Checks if the tokens are None."""
-    tokens = {
-        'PRACTICUM_TOKEN': PRACTICUM_TOKEN,
-        'TELEGRAM_CHAT_ID': TELEGRAM_CHAT_ID,
-        'TELEGRAM_TOKEN': TELEGRAM_TOKEN,
-    }
-    missing_tokens = {}
-    for key, value in tokens.items():
-        if value is None:
-            missing_tokens[key] = value
+    tokens_name = ['PRACTICUM_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN']
+    missing_tokens = []
+    for name in tokens_name:
+        if globals()[name] is None:
+            missing_tokens.append(name)
     if missing_tokens:
         logger.critical('Missing required environment '
-                        f'variables: {list(missing_tokens.keys())}')
-        raise NoTokensError(f'No Token(s): {list(missing_tokens.keys())}')
+                        f'variables: {missing_tokens}')
+        raise NoTokensError(f'No Token(s): {missing_tokens}')
 
 
 def send_message(bot, message):
-    """Sends message to bot."""
+    """Send message to bot."""
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
-        logger.debug('Message sent succesfully')
-    except Exception:
+    except TelegramError:
         logger.exception("Error while sending message to bot")
+    else:
+        logger.debug('Message sent succesfully')
 
 
 def get_api_answer(timestamp):
@@ -67,14 +65,15 @@ def get_api_answer(timestamp):
     try:
         response = requests.get(ENDPOINT, params=params, headers=HEADERS)
     except requests.RequestException:
-        # А почему просто не оставить чтоб исключение RequestException
-        # словилось в main
         raise RequestError('Something went wrong while getting data '
                            'from endpoint')
 
     if response.status_code != HTTPStatus.OK:
         raise AnswerNot200Error('Incorrect status code')
-    return response.json()  # Обрабатывается в main()
+    try:
+        return response.json()  # Обрабатывается в main()
+    except Exception:
+        raise JsonError('Error while parsing json to python type')
 
 
 def check_response(response):
@@ -84,9 +83,9 @@ def check_response(response):
     if 'homeworks' not in response:
         raise KeyError('Key "homeworks" is not in response')
     if 'current_date' not in response:
-        logger.error('Key "current_date" is not in response')
+        raise KeyError('Key "current_date" is not in response')
     if not isinstance(response['current_date'], int):
-        logger.error('"current_date" is not <int>')
+        raise TypeError('"current_date" is not <int>')
     if not isinstance(response['homeworks'], list):
         raise TypeError('Response is not dict')
     return response
@@ -95,10 +94,10 @@ def check_response(response):
 def parse_status(homework):
     """Returns status info."""
     if 'homework_name' not in homework:
-        raise ValueError('Dict "homework_name" is not in '
-                         'response["homework"][0]')
+        raise KeyError('Dict "homework_name" is not in '
+                       'response["homework"][0]')
     if 'status' not in homework:
-        raise ValueError('Str "status" is not in response["homework"][0]')
+        raise KeyError('Str "status" is not in response["homework"][0]')
     homework_name = homework['homework_name']
     if homework['status'] not in HOMEWORK_VERDICTS:
         raise ValueError('Unknow status')
@@ -112,6 +111,11 @@ def main():
     bot = Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     last_error_msg = ''
+    last_message = ''
+    NOT_SEND_ERRORS = [
+        'Key "current_date" is not in response',
+        '"current_date" is not <int>',
+    ]
 
     while True:
         try:
@@ -120,13 +124,16 @@ def main():
             timestamp = response['current_date']
             if response['homeworks']:
                 message = parse_status(response['homeworks'][0])
-                send_message(bot, message)
+                if message != last_message:
+                    send_message(bot, message)
+                last_message = message
             else:
                 logger.debug('No new status')
         except Exception as error:
             error_message = f'Сбой в работе программы: {error}'
             logger.exception(error_message)
-            if str(error) != last_error_msg:
+            if (str(error) != last_error_msg and str(error)
+                    not in NOT_SEND_ERRORS):
                 send_message(bot, error_message)
             last_error_msg = str(error)
         finally:

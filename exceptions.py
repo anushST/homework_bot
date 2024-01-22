@@ -14,3 +14,9 @@ class AnswerNot200Error(Exception):
     """Raises only when answer not 200."""
 
     pass
+
+
+class JsonError(Exception):
+    """Error while parse json to python types."""
+
+    pass
