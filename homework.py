@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from json import JSONDecodeError
 from http import HTTPStatus
 
 import requests
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 from telegram import Bot, TelegramError
 
 from exceptions import (AnswerNot200Error, JsonError, NoTokensError,
-                        RequestError)
+                        RequestError, CurrentDateError)
 
 load_dotenv()
 
@@ -64,15 +65,13 @@ def get_api_answer(timestamp):
     params = {'from_date': timestamp}
     try:
         response = requests.get(ENDPOINT, params=params, headers=HEADERS)
+        if response.status_code != HTTPStatus.OK:
+            raise AnswerNot200Error('Incorrect status code')
+        return response.json()
     except requests.RequestException:
         raise RequestError('Something went wrong while getting data '
-                           'from endpoint')
-
-    if response.status_code != HTTPStatus.OK:
-        raise AnswerNot200Error('Incorrect status code')
-    try:
-        return response.json()  # Обрабатывается в main()
-    except Exception:
+                           f'from endpoint {ENDPOINT}')
+    except JSONDecodeError:
         raise JsonError('Error while parsing json to python type')
 
 
@@ -83,9 +82,9 @@ def check_response(response):
     if 'homeworks' not in response:
         raise KeyError('Key "homeworks" is not in response')
     if 'current_date' not in response:
-        raise KeyError('Key "current_date" is not in response')
+        raise CurrentDateError('Key "current_date" is not in response')
     if not isinstance(response['current_date'], int):
-        raise TypeError('"current_date" is not <int>')
+        raise CurrentDateError('"current_date" is not <int>')
     if not isinstance(response['homeworks'], list):
         raise TypeError('Response is not dict')
     return response
@@ -110,12 +109,7 @@ def main():
     check_tokens()
     bot = Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
-    last_error_msg = ''
     last_message = ''
-    NOT_SEND_ERRORS = [
-        'Key "current_date" is not in response',
-        '"current_date" is not <int>',
-    ]
 
     while True:
         try:
@@ -129,13 +123,14 @@ def main():
                 last_message = message
             else:
                 logger.debug('No new status')
+        except CurrentDateError:
+            logger.exception('Errors with current date')
         except Exception as error:
             error_message = f'Сбой в работе программы: {error}'
             logger.exception(error_message)
-            if (str(error) != last_error_msg and str(error)
-                    not in NOT_SEND_ERRORS):
+            if (str(error) != last_message):
                 send_message(bot, error_message)
-            last_error_msg = str(error)
+            last_message = str(error)
         finally:
             time.sleep(RETRY_PERIOD)
 

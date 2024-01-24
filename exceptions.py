@@ -20,3 +20,9 @@ class JsonError(Exception):
     """Error while parse json to python types."""
 
     pass
+
+
+class CurrentDateError(Exception):
+    """Raises when CurrentDate is unusual."""
+
+    pass
